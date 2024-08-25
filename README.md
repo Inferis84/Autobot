@@ -18,4 +18,6 @@ If you want to have all of the original pictures in a channel saved as well, the
 The .envsetup file will need to be renamed to .env for the connection to Discord to work. You will also need to change the <token> value to your Discord bot's token, generated on your bot's configuration area in the [Discord Developer Portal](https://discord.com/developers/applications).
 
 ## Docker
-A dockerfile has been included so that this bot can run within a docker container. When doing this, make sure to mount the image folder to something outside of the container so that the images aren't lost if the container is ever removed!
+This project has a docker image available to run as a docker container. The image is on [Dockerhub](https://hub.docker.com/repository/docker/inferis84/autobot/general), or a new one can be built with the included dockerfile.
+
+When running a container, make sure to mount the /images and /db folders so that data is not lost with a container. Also, the environment variable `DISCORD_TOKEN` is also required, which should be set to your bot's token as you would in the `.env` file.

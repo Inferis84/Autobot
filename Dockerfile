@@ -1,7 +1,7 @@
 FROM python:3.12.5-slim
 
-WORKDIR /app
+ADD autobot.py .
 
-COPY . /app/
+RUN pip install discord.py python-dotenv
 
-CMD ["python autobot.py"]
+CMD ["python", "./autobot.py"]

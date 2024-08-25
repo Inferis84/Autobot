@@ -8,27 +8,39 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
+#region Constants
+
 # Set up the token for connecting to discord
 load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Emoji to use for all reactions
-emoji = '<:autobot:1276681775904591915>'
+EMOJI = '<:autobot:1276681775904591915>'
 
 # Standard format to use when converting dates
-dateformat = '%d/%m/%Y %H:%M:%S'
+DATEFORMAT = '%d/%m/%Y %H:%M:%S'
 
 # Role restriction. All commands will be restricted to this role.
-role = 'Admin Bots'
+ROLE = 'Admin Bots'
 
 # Path that will be used to store images
-imagepath = './images/'
+IMAGEPATH = './images/'
+
+# Path for db
+DBPATH = './db/'
+
+#endregion
+
+#region Setup
 
 # Set up database connection
-dbCon = sqlite3.connect('autobot.db')
+if not os.path.exists(DBPATH):
+    os.mkdir(DBPATH)
+
+dbCon = sqlite3.connect(f'{DBPATH}autobot.db')
 dbCur = dbCon.cursor()
 
-# CSet up tables in the db
+# Set up tables in the db
 dbCur.execute('CREATE TABLE IF NOT EXISTS channels('
               'channelid INTEGER PRIMARY KEY, '
               'enabled INTEGER NOT NULL'
@@ -60,10 +72,12 @@ bot = commands.Bot(
     help_command=help_command,
     intents=intents)
 
-# Commands
+#endregion
+
+#region Commands
 
 @bot.command(help='Starts tracking the channel.')
-@commands.has_role(role)
+@commands.has_role(ROLE)
 async def track(
     ctx,
     channel: discord.TextChannel = commands.parameter(
@@ -92,7 +106,7 @@ async def track_error(ctx, error):
         )
 
 @bot.command(help='Stops tracking the channel.')
-@commands.has_role(role)
+@commands.has_role(ROLE)
 async def untrack(
     ctx,
     channel_name: str = commands.parameter(
@@ -117,7 +131,7 @@ async def untrack(
             await ctx.send(f'{channel.mention} is no longer being tracked.')
 
 @bot.command(help='Lists the currently tracked channels.')
-@commands.has_role(role)
+@commands.has_role(ROLE)
 async def list(ctx):
     channelids = get_channelids()
 
@@ -137,7 +151,7 @@ async def list(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(help='Scans for images from the selected channels and saves them.')
-@commands.has_role(role)
+@commands.has_role(ROLE)
 async def scan(ctx: commands.Context):
     channelids = get_channelids()
 
@@ -161,7 +175,9 @@ async def scan(ctx: commands.Context):
 
     await ctx.send('Scan complete!')
 
-# Helper functions
+#endregion
+
+#region Helper functions
 
 def get_channelids():
     res = dbCur.execute('SELECT channelid FROM channels WHERE enabled = TRUE')
@@ -189,9 +205,9 @@ async def pull_images_from_message(message: discord.Message):
         if savedMessage is None:
             await save_images(message)
             messageDate = get_message_date(message)
-            dbCur.execute('INSERT INTO imageMessages VALUES(?, ?, ?)', [(message.id), (message.channel.id), (messageDate.strftime(dateformat))])
+            dbCur.execute('INSERT INTO imageMessages VALUES(?, ?, ?)', [(message.id), (message.channel.id), (messageDate.strftime(DATEFORMAT))])
             dbCon.commit()
-            await message.add_reaction(emoji)
+            await message.add_reaction(EMOJI)
 
 def get_first_day_of_week(date: datetime):
     firstDay = date - timedelta((date.weekday() + 1) % 7)
@@ -201,7 +217,7 @@ def get_path(message: discord.Message):
     messageDate = get_message_date(message)
     week = get_first_day_of_week(messageDate)
     author = message.author.name
-    path = f'{imagepath}/{week.strftime('%Y-%m-%d')}/{message.channel.name}/{author}/'
+    path = f'{IMAGEPATH}/{week.strftime('%Y-%m-%d')}/{message.channel.name}/{author}/'
     if not os.path.exists(path):
         os.makedirs(path)
     return path
@@ -218,7 +234,9 @@ async def save_images(message: discord.Message):
             filename = get_next_image_name(path, message.author.name)
             await attachment.save(path + filename + extension)
 
-# Events
+#endregion
+
+#region Events
 
 @bot.event
 async def on_ready():
@@ -241,5 +259,7 @@ async def on_message(message):
     await pull_images_from_message(message)
 
     await bot.process_commands(message)
+
+#endregion
 
 bot.run(TOKEN)
