@@ -18,6 +18,12 @@ emoji = '<:autobot:1276681775904591915>'
 # Standard format to use when converting dates
 dateformat = '%d/%m/%Y %H:%M:%S'
 
+# Role restriction. All commands will be restricted to this role.
+role = 'Admin Bots'
+
+# Path that will be used to store images
+imagepath = './images/'
+
 # Set up database connection
 dbCon = sqlite3.connect('autobot.db')
 dbCur = dbCon.cursor()
@@ -57,7 +63,7 @@ bot = commands.Bot(
 # Commands
 
 @bot.command(help='Starts tracking the channel.')
-@commands.has_role('Admin Bots')
+@commands.has_role(role)
 async def track(
     ctx,
     channel: discord.TextChannel = commands.parameter(
@@ -86,7 +92,7 @@ async def track_error(ctx, error):
         )
 
 @bot.command(help='Stops tracking the channel.')
-@commands.has_role('Admin Bots')
+@commands.has_role(role)
 async def untrack(
     ctx,
     channel_name: str = commands.parameter(
@@ -111,7 +117,7 @@ async def untrack(
             await ctx.send(f'{channel.mention} is no longer being tracked.')
 
 @bot.command(help='Lists the currently tracked channels.')
-@commands.has_role('Admin Bots')
+@commands.has_role(role)
 async def list(ctx):
     channelids = get_channelids()
 
@@ -131,7 +137,7 @@ async def list(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(help='Scans for images from the selected channels and saves them.')
-@commands.has_role('Admin Bots')
+@commands.has_role(role)
 async def scan(ctx: commands.Context):
     channelids = get_channelids()
 
@@ -195,7 +201,7 @@ def get_path(message: discord.Message):
     messageDate = get_message_date(message)
     week = get_first_day_of_week(messageDate)
     author = message.author.name
-    path = f'./images/{message.channel.name}/{week.strftime('%Y-%m-%d')}/{author}/'
+    path = f'{imagepath}/{week.strftime('%Y-%m-%d')}/{message.channel.name}/{author}/'
     if not os.path.exists(path):
         os.makedirs(path)
     return path
