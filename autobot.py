@@ -188,7 +188,7 @@ def get_channelids():
 def message_contains_images(message: discord.Message):
     if len(message.attachments) > 0:
         for attachment in message.attachments:
-            if 'image' in attachment.content_type:
+            if attachment.content_type is not None and 'image' in attachment.content_type:
                 return True
     return False
 
@@ -207,7 +207,8 @@ async def pull_images_from_message(message: discord.Message):
             messageDate = get_message_date(message)
             dbCur.execute('INSERT INTO imageMessages VALUES(?, ?, ?)', [(message.id), (message.channel.id), (messageDate.strftime(DATEFORMAT))])
             dbCon.commit()
-            await message.add_reaction(EMOJI)
+            if len(message.reactions) < 20: # Discord has a limit of 20 reactions per message, so don't bother if there's more
+                await message.add_reaction(EMOJI)
 
 def get_first_day_of_week(date: datetime):
     firstDay = date - timedelta((date.weekday() + 1) % 7)
