@@ -8,6 +8,21 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
+#region Notes for improvements or added features
+
+'''
+    * Add a new table for tracking which server each channel is from.
+    When doing any functions, only pull from the channels in the current server.
+    Currently functions won't cross into other servers, but they will act as if there are tracked channels when there aren't.
+
+    * Add tracking to threads inside of channels.
+    This will probably require another table as well, to track the channel attached to the thread.
+    The folder for images will sit beside other channels, as if the thread were a channel itself.
+    We'll mark the folder as a thread to keep it from being confusing.
+'''
+
+#endregion
+
 #region Constants
 
 # Set up the token for connecting to discord
@@ -133,7 +148,7 @@ async def untrack(
 @bot.command(help='Lists the currently tracked channels.')
 @commands.has_role(ROLE)
 async def list(ctx):
-    channelids = get_channelids()
+    channelids = get_tracked_channelids()
 
     if not channelids:
         await ctx.send('No channels are currently being tracked.')
@@ -153,7 +168,7 @@ async def list(ctx):
 @bot.command(help='Scans for images from the selected channels and saves them.')
 @commands.has_role(ROLE)
 async def scan(ctx: commands.Context):
-    channelids = get_channelids()
+    channelids = get_tracked_channelids()
 
     if not channelids:
         await ctx.send('No channels are currently being tracked.'
@@ -179,7 +194,7 @@ async def scan(ctx: commands.Context):
 
 #region Helper functions
 
-def get_channelids():
+def get_tracked_channelids():
     res = dbCur.execute('SELECT channelid FROM channels WHERE enabled = TRUE')
     channels = res.fetchall()
     
@@ -257,7 +272,11 @@ async def on_message(message):
     if message.author == bot.user:
         return
     
-    await pull_images_from_message(message)
+    # Grab images if this is a tracked channel and the message contains images
+    channelids = get_tracked_channelids()
+    for id in channelids:
+        if id == message.channel.id:
+            await pull_images_from_message(message)
 
     await bot.process_commands(message)
 
