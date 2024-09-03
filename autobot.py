@@ -8,21 +8,6 @@ from discord.ext import commands
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 
-#region Notes for improvements or added features
-
-'''
-    * Add a new table for tracking which server each channel is from.
-    When doing any functions, only pull from the channels in the current server.
-    Currently functions won't cross into other servers, but they will act as if there are tracked channels when there aren't.
-
-    * Add tracking to threads inside of channels.
-    This will probably require another table as well, to track the channel attached to the thread.
-    The folder for images will sit beside other channels, as if the thread were a channel itself.
-    We'll mark the folder as a thread to keep it from being confusing.
-'''
-
-#endregion
-
 #region Constants
 
 # Set up the token for connecting to discord
@@ -30,7 +15,7 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 
 # Emoji to use for all reactions
-EMOJI = '<:autobot:1276681775904591915>'
+EMOJI = os.getenv('AUTOBOT_EMOJI')
 
 # Standard format to use when converting dates
 DATEFORMAT = '%d/%m/%Y %H:%M:%S'
@@ -39,10 +24,10 @@ DATEFORMAT = '%d/%m/%Y %H:%M:%S'
 ROLE = 'Admin Bots'
 
 # Path that will be used to store images
-IMAGEPATH = './images/'
+IMAGEPATH = './images'
 
 # Path for db
-DBPATH = './db/'
+DBPATH = './db'
 
 #endregion
 
@@ -52,7 +37,7 @@ DBPATH = './db/'
 if not os.path.exists(DBPATH):
     os.mkdir(DBPATH)
 
-dbCon = sqlite3.connect(f'{DBPATH}autobot.db')
+dbCon = sqlite3.connect(os.path.join(DBPATH, 'autobot.db'))
 dbCur = dbCon.cursor()
 
 # Set up tables in the db
@@ -148,27 +133,23 @@ async def untrack(
 @bot.command(help='Lists the currently tracked channels.')
 @commands.has_role(ROLE)
 async def list(ctx):
-    channelids = get_tracked_channelids()
+    guild = ctx.guild
+    channelids = get_tracked_channelids(guild)
 
     if not channelids:
         await ctx.send('No channels are currently being tracked.')
         return
     
-    guild = ctx.guild
-    mentionList = []
+    mentionList = [discord.utils.get(guild.channels, id=id).mention for id in channelids if discord.utils.get(guild.channels, id=id)]
     embed = discord.Embed(title='Tracked Channels', description='Channels currently being tracked for images.', color=0x00ff00)
-    for id in channelids:
-        channel = discord.utils.get(guild.channels, id=id)
-        if channel:
-            mentionList.append(channel.mention)
-    
     embed.add_field(name='Channels', value='\n'.join(mentionList), inline=False)
     await ctx.send(embed=embed)
 
 @bot.command(help='Scans for images from the selected channels and saves them.')
 @commands.has_role(ROLE)
 async def scan(ctx: commands.Context):
-    channelids = get_tracked_channelids()
+    guild = ctx.guild
+    channelids = get_tracked_channelids(guild)
 
     if not channelids:
         await ctx.send('No channels are currently being tracked.'
@@ -178,15 +159,18 @@ async def scan(ctx: commands.Context):
     
     await ctx.send('Starting scan. If there are tracked channels that have never been scanned before, this will take a while. Please be patient.')
 
-    guild = ctx.guild
-    count = 0
-    for id in channelids:
-        channel = discord.utils.get(guild.channels, id=id)
-        if channel:
-            await ctx.send(f'Scanning channel {channel.mention}...')
-            async for message in channel.history(limit=999999999, oldest_first=True):
-                count += 1
-                await pull_images_from_message(message)
+    channels = [discord.utils.get(guild.channels, id=id) for id in channelids if discord.utils.get(guild.channels, id=id)]
+    threads = [thread for thread in guild.threads if thread.parent_id in channelids]
+
+    for channel in channels:
+        await ctx.send(f'Scanning channel {channel.mention}...')
+        async for message in channel.history(limit=999999999, oldest_first=True):
+            await pull_images_from_message(message)
+    
+    for thread in threads:
+        await ctx.send(f'Scanning thread {thread.mention}...')
+        async for message in thread.history(limit=999999999, oldest_first=True):
+            await pull_images_from_message(message)
 
     await ctx.send('Scan complete!')
 
@@ -194,11 +178,12 @@ async def scan(ctx: commands.Context):
 
 #region Helper functions
 
-def get_tracked_channelids():
+def get_tracked_channelids(guild: discord.Guild):
     res = dbCur.execute('SELECT channelid FROM channels WHERE enabled = TRUE')
     channels = res.fetchall()
-    
-    return [id[0] for id in channels]
+    guildChannelIds = [channel.id for channel in guild.channels]
+
+    return [id[0] for id in channels if id[0] in guildChannelIds]
 
 def message_contains_images(message: discord.Message):
     if len(message.attachments) > 0:
@@ -225,7 +210,8 @@ async def pull_images_from_message(message: discord.Message):
             if len(message.reactions) < 20: # Discord has a limit of 20 reactions per message, so don't bother if there's more
                 await message.add_reaction(EMOJI)
 
-def get_first_day_of_week(date: datetime):
+def get_first_day_of_week(date: datetime, weeksBackInTime: int = 0):
+    date = date - timedelta(weeksBackInTime * 7)
     firstDay = date - timedelta((date.weekday() + 1) % 7)
     return firstDay
 
@@ -233,7 +219,8 @@ def get_path(message: discord.Message):
     messageDate = get_message_date(message)
     week = get_first_day_of_week(messageDate)
     author = message.author.name
-    path = f'{IMAGEPATH}/{week.strftime('%Y-%m-%d')}/{message.channel.name}/{author}/'
+    channelname = f'{message.channel.parent.name}-{message.channel.name}' if isinstance(message.channel, discord.Thread) else message.channel.name
+    path = os.path.join(IMAGEPATH, week.strftime('%Y-%m-%d'), channelname, author)
     if not os.path.exists(path):
         os.makedirs(path)
     return path
@@ -248,7 +235,8 @@ async def save_images(message: discord.Message):
         if 'image' in attachment.content_type:
             filename, extension = os.path.splitext(attachment.filename)
             filename = get_next_image_name(path, message.author.name)
-            await attachment.save(path + filename + extension)
+            fullpath = os.path.join(path, f'{filename}{extension}')
+            await attachment.save(fullpath)
 
 #endregion
 
@@ -268,18 +256,23 @@ async def on_ready():
         #    raise
 
 @bot.event
-async def on_message(message):
+async def on_message(message: discord.Message):
     if message.author == bot.user:
         return
-    
+
     # Grab images if this is a tracked channel and the message contains images
-    channelids = get_tracked_channelids()
-    for id in channelids:
-        if id == message.channel.id:
-            await pull_images_from_message(message)
+    channelids = get_tracked_channelids(message.guild)
+    if message.channel.id in channelids or (isinstance(message.channel, discord.Thread) and not message.channel.is_private() and message.channel.parent_id in channelids):
+        await pull_images_from_message(message)
 
     await bot.process_commands(message)
 
+@bot.event
+async def on_thread_create(thread: discord.Thread):
+    channelids = get_tracked_channelids(thread.guild)
+    if not thread.is_private() and thread.parent_id in channelids:
+        await thread.join()
+
 #endregion
 
-bot.run(TOKEN)
+bot.run(TOKEN) 

@@ -1,1 +1,2 @@
-DISCORD_TOKEN=<token>
+DISCORD_TOKEN=token
+AUTOBOT_EMOJI=<:emojiname:emoji_id>
