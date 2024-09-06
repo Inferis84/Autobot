@@ -165,7 +165,6 @@ async def scan(
         )
         return
     
-    print('Channel name:', channel_name)
     if channel_name is not None:
         print('Filtering by channel!')
         scanChannel = discord.utils.get(guild.channels, name=channel_name)
@@ -218,16 +217,14 @@ async def scan(
 #region Helper functions
 
 def build_scan_embed(scanChannels, imageCounts, scanComplete: bool = False):
-    embed = discord.Embed(title='Scan', description='Scanning channels and threads for images...', color=discord.Color.red())
+    thumbnail = 'https://media.tenor.com/T5PCIba7T2QAAAAM/transformers-soundwave.gif' if scanComplete else 'https://pa1.aminoapps.com/6283/94f8d4b397ffcec67698f27c28c9c23addfc318e_hq.gif'
+    description = 'Scan complete!' if scanComplete else 'Scanning channels and threads for images...'
+    embed = discord.Embed(title='Scan', description=description, color=discord.Color.red())
+    embed.set_thumbnail(url=thumbnail)
     embed.add_field(name='Channels/Threads - New Images',
                     value='\n'.join(f'{scanChannel}\t\t-\t{x}' for scanChannel,x in zip(scanChannels, imageCounts)),
                     inline=False)
     embed.set_footer(text=f'Total New Images Scanned - {sum(imageCounts)}')
-
-    if scanComplete:
-        embed.set_thumbnail(url='https://media.tenor.com/T5PCIba7T2QAAAAM/transformers-soundwave.gif')
-    else:
-        embed.set_thumbnail(url='https://pa1.aminoapps.com/6283/94f8d4b397ffcec67698f27c28c9c23addfc318e_hq.gif')
 
     return embed
 
