@@ -79,7 +79,7 @@ bot = commands.Bot(
 @bot.command(help='Starts tracking the channel.')
 @commands.has_role(ROLE)
 async def track(
-    ctx,
+    ctx: commands.Context,
     channel: discord.TextChannel = commands.parameter(
         default=lambda ctx: ctx.channel,
         description='The text channel to track. Default is the current channel.'
@@ -99,7 +99,7 @@ async def track(
             await ctx.send(f'{channel.mention} is now being tracked.')
 
 @track.error
-async def track_error(ctx, error):
+async def track_error(ctx: commands.Context, error):
     if isinstance(error, commands.ChannelNotFound):
         await ctx.send('No channel was found.'
                        ' Make sure to give the full name of the channel, or just call track in the channel you wish to track.'
@@ -108,7 +108,7 @@ async def track_error(ctx, error):
 @bot.command(help='Stops tracking the channel.')
 @commands.has_role(ROLE)
 async def untrack(
-    ctx,
+    ctx: commands.Context,
     channel_name: str = commands.parameter(
         default=lambda ctx: ctx.channel.name,
         description='The channel to stop tracking. Default is the current channel.'
@@ -132,7 +132,7 @@ async def untrack(
 
 @bot.command(help='Lists the currently tracked channels.')
 @commands.has_role(ROLE)
-async def list(ctx):
+async def list(ctx: commands.Context):
     guild = ctx.guild
     channelids = get_tracked_channelids(guild)
 
@@ -140,14 +140,22 @@ async def list(ctx):
         await ctx.send('No channels are currently being tracked.')
         return
     
+    threads = [thread for thread in guild.threads if thread.parent_id in channelids]
+    
     mentionList = [discord.utils.get(guild.channels, id=id).mention for id in channelids if discord.utils.get(guild.channels, id=id)]
-    embed = discord.Embed(title='Tracked Channels', description='Channels currently being tracked for images.', color=0x00ff00)
-    embed.add_field(name='Channels', value='\n'.join(mentionList), inline=False)
+    mentionList.extend([thread.mention for thread in threads])
+    embed = discord.Embed(title='Tracking List', description='Channels and threads currently being tracked for images.', color=0x00ff00)
+    embed.add_field(name='Channels/Threads', value='\n'.join(mentionList), inline=False)
     await ctx.send(embed=embed)
 
 @bot.command(help='Scans for images from the selected channels and saves them.')
 @commands.has_role(ROLE)
-async def scan(ctx: commands.Context):
+async def scan(
+    ctx: commands.Context,
+    channel_name: str = commands.parameter(
+        default=None,
+        description='The specific channel to scan. If none provided, scans all.'
+    )):
     guild = ctx.guild
     channelids = get_tracked_channelids(guild)
 
@@ -157,26 +165,71 @@ async def scan(ctx: commands.Context):
         )
         return
     
-    await ctx.send('Starting scan. If there are tracked channels that have never been scanned before, this will take a while. Please be patient.')
+    print('Channel name:', channel_name)
+    if channel_name is not None:
+        print('Filtering by channel!')
+        scanChannel = discord.utils.get(guild.channels, name=channel_name)
+        print('Scan channel:', scanChannel)
+        if not scanChannel:
+            await ctx.send(f'{channel_name} is not a channel.'
+                       ' Please enter the full name of the channel, not including the #.'
+            )
+            return
+        else:
+            channelids = [id for id in channelids if id == scanChannel.id]
 
     channels = [discord.utils.get(guild.channels, id=id) for id in channelids if discord.utils.get(guild.channels, id=id)]
     threads = [thread for thread in guild.threads if thread.parent_id in channelids]
 
+    mentionList = [channel.mention for channel in channels]
+    mentionList.extend([thread.mention for thread in threads])
+    imageCounts = [0 for _ in channels]
+    imageCounts.extend([0 for _ in threads])
+    embed = build_scan_embed(mentionList, imageCounts)
+    embedMessage = await ctx.send(embed=embed)
+
+    scanIndex = 0
+
     for channel in channels:
-        await ctx.send(f'Scanning channel {channel.mention}...')
         async for message in channel.history(limit=999999999, oldest_first=True):
-            await pull_images_from_message(message)
+            messageImageCount = await pull_images_from_message(message)
+            if messageImageCount > 0:
+                imageCounts[scanIndex] += 1
+                embed = build_scan_embed(mentionList, imageCounts)
+                await embedMessage.edit(embed=embed)
+        scanIndex += 1
+
     
     for thread in threads:
-        await ctx.send(f'Scanning thread {thread.mention}...')
         async for message in thread.history(limit=999999999, oldest_first=True):
-            await pull_images_from_message(message)
+            messageImageCount = await pull_images_from_message(message)
+            if messageImageCount > 0:
+                imageCounts[scanIndex] += 1
+                embed = build_scan_embed(mentionList, imageCounts)
+                await embedMessage.edit(embed=embed)
+        scanIndex += 1
 
-    await ctx.send('Scan complete!')
+    embed = build_scan_embed(mentionList, imageCounts, True)
+    embed.color = discord.Color.green()
+    await embedMessage.edit(embed=embed)
 
 #endregion
 
 #region Helper functions
+
+def build_scan_embed(scanChannels, imageCounts, scanComplete: bool = False):
+    embed = discord.Embed(title='Scan', description='Scanning channels and threads for images...', color=discord.Color.red())
+    embed.add_field(name='Channels/Threads - New Images',
+                    value='\n'.join(f'{scanChannel}\t\t-\t{x}' for scanChannel,x in zip(scanChannels, imageCounts)),
+                    inline=False)
+    embed.set_footer(text=f'Total New Images Scanned - {sum(imageCounts)}')
+
+    if scanComplete:
+        embed.set_thumbnail(url='https://media.tenor.com/T5PCIba7T2QAAAAM/transformers-soundwave.gif')
+    else:
+        embed.set_thumbnail(url='https://pa1.aminoapps.com/6283/94f8d4b397ffcec67698f27c28c9c23addfc318e_hq.gif')
+
+    return embed
 
 def get_tracked_channelids(guild: discord.Guild):
     res = dbCur.execute('SELECT channelid FROM channels WHERE enabled = TRUE')
@@ -199,16 +252,18 @@ def get_message_date(message: discord.Message):
     return messageDate
 
 async def pull_images_from_message(message: discord.Message):
+    imageCount = 0
     if message_contains_images(message):
         res = dbCur.execute('SELECT messagedate FROM imageMessages WHERE messageid = ?', [(message.id)])
         savedMessage = res.fetchone()
         if savedMessage is None:
-            await save_images(message)
+            imageCount = await save_images(message)
             messageDate = get_message_date(message)
             dbCur.execute('INSERT INTO imageMessages VALUES(?, ?, ?)', [(message.id), (message.channel.id), (messageDate.strftime(DATEFORMAT))])
             dbCon.commit()
             if len(message.reactions) < 20: # Discord has a limit of 20 reactions per message, so don't bother if there's more
                 await message.add_reaction(EMOJI)
+    return imageCount
 
 def get_first_day_of_week(date: datetime, weeksBackInTime: int = 0):
     date = date - timedelta(weeksBackInTime * 7)
@@ -231,12 +286,15 @@ def get_next_image_name(path: str, username: str):
 
 async def save_images(message: discord.Message):
     path = get_path(message)
+    imageCount = 0
     for attachment in message.attachments:
         if 'image' in attachment.content_type:
             filename, extension = os.path.splitext(attachment.filename)
             filename = get_next_image_name(path, message.author.name)
             fullpath = os.path.join(path, f'{filename}{extension}')
             await attachment.save(fullpath)
+            imageCount += 1
+    return imageCount
 
 #endregion
 
