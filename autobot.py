@@ -60,6 +60,8 @@ print(f'Database setup complete: {res.fetchall()}')
 # Set up discord intents
 intents = discord.Intents.default()
 intents.message_content = True
+intents.messages = True
+intents.reactions = True
 
 # Change 'No Category' to something more meaningful
 help_command = commands.DefaultHelpCommand(
@@ -327,6 +329,19 @@ async def on_thread_create(thread: discord.Thread):
     channelids = get_tracked_channelids(thread.guild)
     if not thread.is_private() and thread.parent_id in channelids:
         await thread.join()
+
+@bot.event
+async def on_raw_reaction_add(payload: discord.RawReactionActionEvent):
+    if payload.member is None or payload.member.bot:
+        return
+
+    botEmoji = discord.PartialEmoji.from_str(EMOJI)
+
+    if payload.emoji == botEmoji:
+        channel = bot.get_channel(payload.channel_id)
+        message = await channel.fetch_message(payload.message_id)
+        user = payload.member
+        await message.remove_reaction(EMOJI, user)
 
 #endregion
 
